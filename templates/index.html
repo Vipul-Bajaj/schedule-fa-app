@@ -73,7 +73,7 @@
         }
         .flash-messages li {
             display: flex;
-            align-items: center; /* Vertical alignment */
+            align-items: center;
             padding: 12px 15px;
             margin-bottom: 10px;
             border-radius: 5px;
@@ -84,9 +84,9 @@
         .flash-messages .info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
 
         .flash-message-text {
-            flex-grow: 1; /* Allows text to take up most of the space */
-            padding-right: 10px; /* Add some space before the button */
-            word-break: break-word; /* Ensures long words break and wrap */
+            flex-grow: 1;
+            padding-right: 10px;
+            word-break: break-word;
         }
 
         .flash-close-btn {
@@ -98,8 +98,8 @@
             opacity: 0.6;
             cursor: pointer;
             padding: 0 5px;
-            margin-left: auto; /* This will push the button to the far right */
-            flex-shrink: 0; /* Prevent button from shrinking */
+            margin-left: auto;
+            flex-shrink: 0;
             line-height: 1;
         }
         .flash-close-btn:hover {
@@ -128,7 +128,7 @@
             margin-bottom: 0;
             font-size: 0.95em;
         }
-        table#vestingInputTable button.remove-row-btn { /* More specific selector for remove button */
+        table#vestingInputTable button.remove-row-btn {
             padding: 6px 10px;
             font-size: 0.85em;
             background-color: #dc3545;
@@ -150,6 +150,42 @@
         .input-hint {
             font-size:0.9em; color:#555; margin-bottom:10px;
         }
+
+        /* Loading Indicator Styles */
+        #loadingIndicator {
+            display: none; /* Hidden by default */
+            position: fixed; /* Cover the whole page */
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.8); /* Semi-transparent white */
+            z-index: 1000; /* Ensure it's on top */
+            text-align: center;
+        }
+        #loadingIndicator .spinner-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 1.2em;
+            color: #0056b3;
+        }
+        /* Simple CSS Spinner */
+        .spinner {
+            border: 8px solid #f3f3f3; /* Light grey */
+            border-top: 8px solid #007bff; /* Blue */
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
     </style>
 </head>
 <body>
@@ -169,7 +205,7 @@
             {% endif %}
         {% endwith %}
 
-        <form method="POST">
+        <form method="POST" id="vestingForm">
             <div class="form-section">
                 <label for="vesting_data_table">Vesting Data Entries:</label>
                 <p class="input-hint">
@@ -188,9 +224,9 @@
                         {% if form_data %}
                             {% for row_data in form_data %}
                             <tr>
-                                <td><input type="text" name="stock_symbol" value="{{ row_data.stock_symbol }}" placeholder="e.g., AAPL"></td>
-                                <td><input type="text" name="acquisition_date" value="{{ row_data.acquisition_date }}" placeholder="e.g., 20230115" pattern="\d{8}" title="Enter date as YYYYMMDD"></td>
-                                <td><input type="number" name="num_shares" value="{{ row_data.num_shares }}" placeholder="e.g., 10" step=".0001"></td>
+                                <td><input type="text" name="stock_symbol" value="{{ row_data.stock_symbol }}" placeholder="e.g., AAPL" required></td>
+                                <td><input type="text" name="acquisition_date" value="{{ row_data.acquisition_date }}" placeholder="e.g., 20230115" pattern="\d{8}" title="Enter date as YYYYMMDD" required></td>
+                                <td><input type="number" name="num_shares" value="{{ row_data.num_shares }}" placeholder="e.g., 10" step="any" min="0.0001" required></td>
                                 <td><button type="button" class="remove-row-btn" onclick="removeRow(this)">Remove</button></td>
                             </tr>
                             {% endfor %}
@@ -198,7 +234,7 @@
                              <tr>
                                 <td><input type="text" name="stock_symbol" placeholder="e.g., AAPL" required></td>
                                 <td><input type="text" name="acquisition_date" placeholder="e.g., 20230115" pattern="\d{8}" title="Enter date as YYYYMMDD" required></td>
-                                <td><input type="number" name="num_shares" placeholder="e.g., 10"  step=".0001" required></td>
+                                <td><input type="number" name="num_shares" placeholder="e.g., 10" step="any" min="0.0001" required></td>
                                 <td><button type="button" class="remove-row-btn" onclick="removeRow(this)">Remove</button></td>
                             </tr>
                         {% endif %}
@@ -219,37 +255,46 @@
             </div>
         </form>
 
-        {% if results %}
-        <div class="results-container">
-            <h2>Analysis Results</h2>
-            <table class="results-table">
-                <thead>
-                    <tr>
-                        <th>Nasdaq Symbol</th>
-                        <th>Shares Acquired</th>
-                        <th>Acq. Date (YYYYMMDD)</th>
-                        <th>Acq. Price/Share (INR)</th>
-                        <th>Initial Value (INR)</th>
-                        <th>Peak Value (INR) (Date YYYY/MM/DD, Price/Share INR)</th>
-                        <th>Closing Value (INR) (Date YYYY/MM/DD, Price/Share INR)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in results %}
-                    <tr>
-                        <td>{{ row.stock_symbol }}</td>
-                        <td>{{ row.num_shares }}</td>
-                        <td>{{ row.acquisition_date_str }}</td>
-                        <td>{{ row.acq_price_display_str }}</td>
-                        <td>{{ row.initial_value_display_str }}</td>
-                        <td>{{ row.peak_output_str }}</td>
-                        <td>{{ row.closing_output_str }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        <div id="loadingIndicator">
+            <div class="spinner-content">
+                <div class="spinner"></div>
+                <p>Analyzing data, please wait...</p>
+            </div>
         </div>
-        {% endif %}
+
+        <div id="resultsDisplayArea">
+            {% if results %}
+            <div class="results-container">
+                <h2>Analysis Results</h2>
+                <table class="results-table">
+                    <thead>
+                        <tr>
+                            <th>Nasdaq Symbol</th>
+                            <th>Shares Acquired</th>
+                            <th>Acq. Date (YYYYMMDD)</th>
+                            <th>Acq. Price/Share (INR)</th>
+                            <th>Initial Value (INR)</th>
+                            <th>Peak Value (INR) (Date YYYY/MM/DD, Price/Share INR)</th>
+                            <th>Closing Value (INR) (Date YYYY/MM/DD, Price/Share INR)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in results %}
+                        <tr>
+                            <td>{{ row.stock_symbol }}</td>
+                            <td>{{ "%.4f"|format(row.num_shares|float) }}</td> {# Format float shares #}
+                            <td>{{ row.acquisition_date_str }}</td>
+                            <td>{{ row.acq_price_display_str }}</td>
+                            <td>{{ row.initial_value_display_str }}</td>
+                            <td>{{ row.peak_output_str }}</td>
+                            <td>{{ row.closing_output_str }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
     </div>
 
     <script>
@@ -259,7 +304,7 @@
             newRow.innerHTML = `
                 <td><input type="text" name="stock_symbol" placeholder="e.g., AAPL" required></td>
                 <td><input type="text" name="acquisition_date" placeholder="e.g., 20230115" pattern="\\d{8}" title="Enter date as YYYYMMDD" required></td>
-                <td><input type="number" name="num_shares" placeholder="e.g., 10" step=.0001 required></td>
+                <td><input type="number" name="num_shares" placeholder="e.g., 10" step="any" min="0.0001" required></td>
                 <td><button type="button" class="remove-row-btn" onclick="removeRow(this)">Remove</button></td>
             `;
         }
@@ -270,7 +315,6 @@
             if (tbody.rows.length > 1) {
                 tbody.removeChild(row);
             } else {
-                // Clear the content of the last row if it's the only one
                 const inputs = row.getElementsByTagName('input');
                 for (let i = 0; i < inputs.length; i++) {
                     inputs[i].value = '';
@@ -282,8 +326,24 @@
         document.addEventListener('DOMContentLoaded', function() {
             const tableBody = document.getElementById('vestingInputTable').getElementsByTagName('tbody')[0];
             if (tableBody.rows.length === 0) {
-                // If Flask didn't render any rows (e.g., form_data was empty on initial GET), add one.
                 addRow();
+            }
+
+            const form = document.getElementById('vestingForm');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const resultsDisplayArea = document.getElementById('resultsDisplayArea');
+
+            if (form) {
+                form.addEventListener('submit', function() {
+                    // Clear previous results from the DOM immediately
+                    if (resultsDisplayArea) {
+                        resultsDisplayArea.innerHTML = '';
+                    }
+                    // Show loading indicator
+                    if (loadingIndicator) {
+                        loadingIndicator.style.display = 'block';
+                    }
+                });
             }
         });
     </script>

@@ -11,7 +11,7 @@ from flask import Flask, render_template, request, flash, redirect, url_for
 
 # --- Flask App Setup ---
 app = Flask(__name__)
-app.secret_key = 'your_very_secret_key_for_stock_analyzer'  # Important for flash messages
+app.secret_key = 'your_very_secret_key_for_stock_analyzer_v2'  # Important for flash messages
 
 # --- Constants ---
 USER_AGENT = 'Mozilla/5.0'
@@ -30,13 +30,13 @@ class VestingEntry(NamedTuple):
     stock_symbol: str
     acquisition_date_str: str
     acquisition_dt: datetime.date
-    num_shares: int
+    num_shares: float  # Changed to float to allow fractional shares
 
 
 class ReportLine(NamedTuple):
     """Represents a single line in the output report for the template."""
     stock_symbol: str
-    num_shares: int
+    num_shares: float  # Changed to float
     acquisition_date_str: str
     acq_price_display_str: str
     initial_value_display_str: str
@@ -48,7 +48,7 @@ class InputRow(NamedTuple):
     """Represents a row of input from the form for repopulation."""
     stock_symbol: str
     acquisition_date: str
-    num_shares: str
+    num_shares: str  # Keep as string for repopulation, validation handles conversion
 
 
 # Type aliases
@@ -91,7 +91,6 @@ def parse_vesting_data_from_form(
         date_str = acquisition_dates_list[i].strip()
         shares_str = num_shares_list_str[i].strip()
 
-        # Skip if all fields in a row are empty, but not if some are filled
         if not symbol and not date_str and not shares_str:
             continue
 
@@ -108,13 +107,14 @@ def parse_vesting_data_from_form(
             continue
 
         try:
-            num_shares = float(shares_str)
+            num_shares = float(shares_str)  # Allow float for shares
             if num_shares <= 0:
-                flash(f"Row {i + 1}: Number of shares must be a positive integer.", "error")
+                flash(f"Row {i + 1}: Number of shares must be a positive number.", "error")  # Updated message
                 has_errors = True
                 continue
         except ValueError:
-            flash(f"Row {i + 1}: Invalid number of shares '{shares_str}'. Must be an integer.", "error")
+            flash(f"Row {i + 1}: Invalid number of shares '{shares_str}'. Must be a number.",
+                  "error")  # Updated message
             has_errors = True
             continue
 
@@ -122,15 +122,15 @@ def parse_vesting_data_from_form(
             stock_symbol=symbol,
             acquisition_date_str=date_str,
             acquisition_dt=acquisition_dt,
-            num_shares=num_shares
+            num_shares=num_shares  # Storing as float
         ))
 
-    if not vesting_entries and not has_errors:  # If all rows were empty and skipped
+    if not vesting_entries and not has_errors:
         flash("At least one vesting entry is required.", "error")
         return None, None, None
 
     if has_errors:
-        return None, None, None  # Indicate parsing failure due to row-specific errors
+        return None, None, None
 
     lowest_acquisition_dates: Dict[StockSymbol, DateStringYYYYMMDD] = {}
     for entry in vesting_entries:
@@ -142,7 +142,7 @@ def parse_vesting_data_from_form(
     try:
         calendar_year_val = int(calendar_year_str)
         current_actual_year = datetime.date.today().year
-        if not (1900 <= calendar_year_val <= current_actual_year + 10):  # Allow a bit into the future
+        if not (1900 <= calendar_year_val <= current_actual_year + 10):
             flash(f"Invalid calendar year. Please enter a 4-digit year between 1900 and {current_actual_year + 10}.",
                   "error")
             return None, None, None
@@ -173,12 +173,10 @@ def fetch_yahoo_stock_prices_for_symbol(
     prices_for_symbol: StockPricesForSymbol = OrderedDict()
 
     earliest_acq_dt = get_date_obj_from_str(earliest_acq_date_str)
-    if not earliest_acq_dt:  # Should not happen if parse_vesting_data_from_form is correct
+    if not earliest_acq_dt:
         flash(f"Internal error: Invalid earliest acquisition date for {stock_symbol}.", "error")
         return prices_for_symbol
 
-    # Fetch data from ~45 days before the earliest acquisition date for this stock
-    # up to Jan 15 of the year after the calendar_year.
     fetch_start_dt_obj = earliest_acq_dt - datetime.timedelta(days=45)
     start_date_ts = int(datetime.datetime(
         fetch_start_dt_obj.year, fetch_start_dt_obj.month, fetch_start_dt_obj.day
@@ -194,12 +192,12 @@ def fetch_yahoo_stock_prices_for_symbol(
 
     try:
         req = Request(stock_prices_url, headers={'User-Agent': USER_AGENT})
-        with urlopen(req, timeout=10) as response:  # Added timeout
+        with urlopen(req, timeout=10) as response:
             html_content = response.read()
         pq = PyQuery(html_content)
 
         history_table_div = pq('div[data-testid="history-table"]')
-        if not history_table_div.length:  # Check if element exists
+        if not history_table_div.length:
             flash(
                 f"Could not find history table container for {stock_symbol}. The page structure might have changed or the symbol is invalid.",
                 "warning")
@@ -215,7 +213,7 @@ def fetch_yahoo_stock_prices_for_symbol(
             flash(f"No data rows found in the history table for {stock_symbol}.", "warning")
             return prices_for_symbol
 
-        for row_html_pq in rows.items():  # Use .items() for PyQuery iteration
+        for row_html_pq in rows.items():
             cells = row_html_pq('td')
             if len(cells) == 7:
                 try:
@@ -226,7 +224,7 @@ def fetch_yahoo_stock_prices_for_symbol(
                     dt_obj = datetime.datetime.strptime(date_text, DATE_FORMAT_YAHOO_PARSE)
                     formatted_date_key = dt_obj.strftime(DATE_FORMAT_INPUT_SCRIPT)
                     price_val = float(close_price_text.replace(',', ''))
-                    prices_for_symbol[formatted_date_key] = round(price_val, 4)
+                    prices_for_symbol[formatted_date_key] = round(price_val, 4)  # Using 4 decimal places for precision
                 except ValueError:
                     app.logger.warning(
                         f"Skipping row for {stock_symbol} due to parsing error (ValueError): {cells.text()[:100]}")
@@ -262,7 +260,7 @@ def fetch_sbi_exchange_rates() -> SbiExchangeRates:
     sbi_rates_data: SbiExchangeRates = OrderedDict()
     try:
         req = Request(SBI_RATES_URL, headers={'User-Agent': USER_AGENT})
-        with urlopen(req, timeout=10) as response:  # Added timeout
+        with urlopen(req, timeout=10) as response:
             html_content = response.read().decode('utf-8')
 
         lines = html_content.splitlines()
@@ -277,7 +275,7 @@ def fetch_sbi_exchange_rates() -> SbiExchangeRates:
                         dt_obj = datetime.datetime.strptime(date_str_csv, DATE_FORMAT_SBI_PARSE)
                         formatted_date_key = dt_obj.strftime(DATE_FORMAT_INPUT_SCRIPT)
                         rate = float(rate_str)
-                        sbi_rates_data[formatted_date_key] = round(rate, 4)
+                        sbi_rates_data[formatted_date_key] = round(rate, 4)  # Using 4 decimal places for precision
                     except ValueError:
                         continue
     except URLError as e:
@@ -290,7 +288,7 @@ def fetch_sbi_exchange_rates() -> SbiExchangeRates:
     return OrderedDict(sorted(sbi_rates_data.items()))
 
 
-# --- Calculation Logic Functions (largely from original) ---
+# --- Calculation Logic Functions ---
 def get_sbi_rate_on_or_before_date(
         target_date_str: Optional[DateStringYYYYMMDD],
         sbi_rates: SbiExchangeRates
@@ -333,7 +331,7 @@ def find_peak_stock_info(
     peak_date_str: Optional[DateStringYYYYMMDD] = None
     for date_str, price in prices_for_symbol.items():
         current_dt_obj = get_date_obj_from_str(date_str)
-        if not current_dt_obj: continue  # Should not happen with valid data
+        if not current_dt_obj: continue
 
         if search_effective_start_dt <= current_dt_obj <= search_end_dt:
             if price > peak_price_val:
@@ -380,28 +378,29 @@ def format_report_line_for_web(
     closing_output_display = "N/A (N/A, N/A)"
 
     if acq_usd_price_val is not None and sbi_rate_on_acq is not None:
-        share_price_inr_on_acq = round(acq_usd_price_val * sbi_rate_on_acq, 4)
-        initial_value_investment_inr = round(num_shares * share_price_inr_on_acq, 4)
+        share_price_inr_on_acq = round(acq_usd_price_val * sbi_rate_on_acq, 4)  # Display with 2 decimal places
+        initial_value_investment_inr = round(num_shares * share_price_inr_on_acq, 4)  # Display with 2 decimal places
         acq_price_display = f"{share_price_inr_on_acq:.2f}"
         initial_value_display = f"{initial_value_investment_inr:.2f}"
 
     if peak_date_str_report and peak_usd_price_val is not None and sbi_rate_on_peak is not None:
-        peak_price_inr_per_share = round(peak_usd_price_val * sbi_rate_on_peak, 4)
-        total_peak_value_inr = round(num_shares * peak_price_inr_per_share, 4)
+        peak_price_inr_per_share = round(peak_usd_price_val * sbi_rate_on_peak, 4)  # Display with 2 decimal places
+        total_peak_value_inr = round(num_shares * peak_price_inr_per_share, 4)  # Display with 2 decimal places
         peak_date_obj = get_date_obj_from_str(peak_date_str_report)
         peak_date_formatted = peak_date_obj.strftime(DATE_FORMAT_DISPLAY) if peak_date_obj else "N/A"
         peak_output_display = f"{total_peak_value_inr:.2f} ({peak_date_formatted}, {peak_price_inr_per_share:.2f})"
 
     if closing_date_str_report and closing_usd_price_val is not None and sbi_rate_on_closing is not None:
-        closing_price_inr_per_share = round(closing_usd_price_val * sbi_rate_on_closing, 4)
-        total_closing_value_inr = round(num_shares * closing_price_inr_per_share, 4)
+        closing_price_inr_per_share = round(closing_usd_price_val * sbi_rate_on_closing,
+                                            4)  # Display with 2 decimal places
+        total_closing_value_inr = round(num_shares * closing_price_inr_per_share, 4)  # Display with 2 decimal places
         closing_date_obj = get_date_obj_from_str(closing_date_str_report)
         closing_date_formatted = closing_date_obj.strftime(DATE_FORMAT_DISPLAY) if closing_date_obj else "N/A"
         closing_output_display = f"{total_closing_value_inr:.2f} ({closing_date_formatted}, {closing_price_inr_per_share:.2f})"
 
     return ReportLine(
         stock_symbol=entry.stock_symbol,
-        num_shares=entry.num_shares,
+        num_shares=entry.num_shares,  # Keep original precision for data integrity
         acquisition_date_str=entry.acquisition_date_str,
         acq_price_display_str=acq_price_display,
         initial_value_display_str=initial_value_display,
@@ -413,8 +412,9 @@ def format_report_line_for_web(
 # --- Flask Routes ---
 @app.route('/', methods=['GET', 'POST'])
 def index():
-    current_year = datetime.date.today().year - 1
+    current_year = datetime.date.today().year - 1  # Default to previous year
     form_data_repopulation = []
+    results_data = None  # Initialize results_data
 
     if request.method == 'POST':
         stock_symbols_list = request.form.getlist('stock_symbol')
@@ -422,14 +422,13 @@ def index():
         num_shares_list_str = request.form.getlist('num_shares')
         calendar_year_str = request.form.get('calendar_year', str(current_year))
 
-        # For repopulating form on error
         for i in range(len(stock_symbols_list)):
             form_data_repopulation.append(InputRow(
                 stock_symbols_list[i],
                 acquisition_dates_list[i],
                 num_shares_list_str[i]
             ))
-        if not form_data_repopulation:  # Ensure at least one row for template if submitted empty
+        if not form_data_repopulation:
             form_data_repopulation.append(InputRow("", "", ""))
 
         if not calendar_year_str:
@@ -437,7 +436,8 @@ def index():
             return render_template('index.html',
                                    form_data=form_data_repopulation,
                                    calendar_year_val=calendar_year_str,
-                                   current_year=current_year)
+                                   current_year=current_year,
+                                   results=None)  # Pass None for results on error
 
         vesting_data_list, calendar_year_int, lowest_acq_dates_map = parse_vesting_data_from_form(
             stock_symbols_list, acquisition_dates_list, num_shares_list_str, calendar_year_str
@@ -447,23 +447,25 @@ def index():
             return render_template('index.html',
                                    form_data=form_data_repopulation,
                                    calendar_year_val=calendar_year_str,
-                                   current_year=current_year)
+                                   current_year=current_year,
+                                   results=None)
 
         if not validate_vesting_data_web(vesting_data_list, calendar_year_int):
             return render_template('index.html',
                                    form_data=form_data_repopulation,
                                    calendar_year_val=calendar_year_str,
-                                   current_year=current_year)
+                                   current_year=current_year,
+                                   results=None)
 
         all_stock_symbols_set = set(entry.stock_symbol for entry in vesting_data_list)
 
+        # Fetch data
         all_stock_prices_data = fetch_all_stock_prices(
             all_stock_symbols_set, lowest_acq_dates_map, calendar_year_int
         )
         sbi_rates_data = fetch_sbi_exchange_rates()
 
         report_data_for_template: List[ReportLine] = []
-        processing_successful = True
 
         for entry in vesting_data_list:
             symbol = entry.stock_symbol
@@ -475,7 +477,6 @@ def index():
             if not current_stock_prices:
                 flash(f"No stock price data retrieved for {symbol}. Results for this entry may be incomplete.",
                       "warning")
-                # Still try to format what we can, or add a specific N/A line
                 report_data_for_template.append(
                     format_report_line_for_web(entry, None, None, None, None, None, None, None, None, None))
                 continue
@@ -509,21 +510,24 @@ def index():
             )
             report_data_for_template.append(report_line_obj)
 
-        if not report_data_for_template and processing_successful:  # No entries processed but no errors
-            flash("No data processed. Please check your input.", "info")
+        results_data = report_data_for_template
+        if not results_data:
+            flash("No data processed. Please check your input or data sources.", "info")
 
         return render_template('index.html',
-                               results=report_data_for_template,
+                               results=results_data,
                                form_data=form_data_repopulation,
                                calendar_year_val=calendar_year_str,
                                current_year=current_year)
 
     # GET request: display empty form with one row
-    form_data_repopulation.append(InputRow("", "", ""))
+    if not form_data_repopulation:  # Ensure at least one row for initial display
+        form_data_repopulation.append(InputRow("", "", ""))
     return render_template('index.html',
                            form_data=form_data_repopulation,
                            calendar_year_val=str(current_year),
-                           current_year=current_year)
+                           current_year=current_year,
+                           results=None)
 
 
 if __name__ == "__main__":
