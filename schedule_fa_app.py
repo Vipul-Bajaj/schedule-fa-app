@@ -6,37 +6,50 @@ from urllib.request import Request, urlopen, URLError
 from pyquery import PyQuery
 import bisect
 from typing import List, Dict, Tuple, Set, Optional, NamedTuple
+import os  # For environment variables
 
 from flask import Flask, render_template, request, flash, redirect, url_for
 
 # --- Flask App Setup ---
 app = Flask(__name__)
-app.secret_key = 'your_very_secret_key_for_stock_analyzer_v2'  # Important for flash messages
+
+# Production configuration:
+# 1. SECRET_KEY: Load from an environment variable for security.
+#    In your production environment, set an environment variable, e.g.,
+#    export FLASK_SECRET_KEY='your_very_long_random_secret_string'
+#    Or for Windows: set FLASK_SECRET_KEY=your_very_long_random_secret_string
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev_default_secret_key_change_me')
+if app.secret_key == 'dev_default_secret_key_change_me' and not app.debug:
+    app.logger.warning(
+        "WARNING: FLASK_SECRET_KEY is not set or is using the default development key in a non-debug environment!")
+
+# 2. DEBUG mode: Should be False in production.
+#    Set by environment variable FLASK_DEBUG=0 or FLASK_ENV=production
+#    app.debug is automatically set by Flask based on FLASK_ENV or FLASK_DEBUG.
+#    Explicitly: app.config['DEBUG'] = False (if not using FLASK_ENV)
 
 # --- Constants ---
 USER_AGENT = 'Mozilla/5.0'
 YAHOO_FINANCE_URL_TEMPLATE = "https://finance.yahoo.com/quote/{symbol}/history?period1={start_ts}&period2={end_ts}&interval=1d&filter=history&frequency=1d"
 SBI_RATES_URL = "https://raw.githubusercontent.com/sahilgupta/sbi-fx-ratekeeper/main/csv_files/SBI_REFERENCE_RATES_USD.csv"
 
-DATE_FORMAT_INPUT_SCRIPT = "%Y%m%d"  # For internal processing of dates from input
+DATE_FORMAT_INPUT_SCRIPT = "%Y%m%d"
 DATE_FORMAT_YAHOO_PARSE = "%b %d, %Y"
 DATE_FORMAT_SBI_PARSE = '%Y-%m-%d'
-DATE_FORMAT_DISPLAY = "%Y/%m/%d"  # For displaying dates in the report
+DATE_FORMAT_DISPLAY = "%Y/%m/%d"
 
 
 # --- Data Structures ---
 class VestingEntry(NamedTuple):
-    """Represents a single vesting entry."""
     stock_symbol: str
     acquisition_date_str: str
     acquisition_dt: datetime.date
-    num_shares: float  # Changed to float to allow fractional shares
+    num_shares: float
 
 
 class ReportLine(NamedTuple):
-    """Represents a single line in the output report for the template."""
     stock_symbol: str
-    num_shares: float  # Changed to float
+    num_shares: float
     acquisition_date_str: str
     acq_price_display_str: str
     initial_value_display_str: str
@@ -45,13 +58,11 @@ class ReportLine(NamedTuple):
 
 
 class InputRow(NamedTuple):
-    """Represents a row of input from the form for repopulation."""
     stock_symbol: str
     acquisition_date: str
-    num_shares: str  # Keep as string for repopulation, validation handles conversion
+    num_shares: str
 
 
-# Type aliases
 StockSymbol = str
 DateStringYYYYMMDD = str
 Price = float
@@ -63,10 +74,10 @@ SbiExchangeRates = OrderedDict[DateStringYYYYMMDD, Price]
 # --- Helper Functions ---
 
 def get_date_obj_from_str(date_str: DateStringYYYYMMDD) -> Optional[datetime.date]:
-    """Converts YYYYMMDD string to datetime.date object, returns None on error."""
     try:
         return datetime.datetime.strptime(date_str, DATE_FORMAT_INPUT_SCRIPT).date()
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as e:
+        app.logger.error(f"Error converting date string '{date_str}': {e}")
         return None
 
 
@@ -76,9 +87,6 @@ def parse_vesting_data_from_form(
         num_shares_list_str: List[str],
         calendar_year_str: str
 ) -> Tuple[Optional[List[VestingEntry]], Optional[int], Optional[Dict[StockSymbol, DateStringYYYYMMDD]]]:
-    """
-    Parses vesting data from web form input lists.
-    """
     if not any(stock_symbols_list) and not any(acquisition_dates_list) and not any(num_shares_list_str):
         flash("At least one vesting entry is required.", "error")
         return None, None, None
@@ -107,14 +115,13 @@ def parse_vesting_data_from_form(
             continue
 
         try:
-            num_shares = float(shares_str)  # Allow float for shares
+            num_shares = float(shares_str)
             if num_shares <= 0:
-                flash(f"Row {i + 1}: Number of shares must be a positive number.", "error")  # Updated message
+                flash(f"Row {i + 1}: Number of shares must be a positive number.", "error")
                 has_errors = True
                 continue
         except ValueError:
-            flash(f"Row {i + 1}: Invalid number of shares '{shares_str}'. Must be a number.",
-                  "error")  # Updated message
+            flash(f"Row {i + 1}: Invalid number of shares '{shares_str}'. Must be a number.", "error")
             has_errors = True
             continue
 
@@ -122,7 +129,7 @@ def parse_vesting_data_from_form(
             stock_symbol=symbol,
             acquisition_date_str=date_str,
             acquisition_dt=acquisition_dt,
-            num_shares=num_shares  # Storing as float
+            num_shares=num_shares
         ))
 
     if not vesting_entries and not has_errors:
@@ -154,7 +161,6 @@ def parse_vesting_data_from_form(
 
 
 def validate_vesting_data_web(vesting_entries: List[VestingEntry], calendar_year: int) -> bool:
-    """Validates vesting data for web context. Returns True if valid, False otherwise."""
     for entry in vesting_entries:
         if entry.acquisition_dt.year > calendar_year:
             flash(f"Error: Acquisition date {entry.acquisition_date_str} for {entry.stock_symbol} "
@@ -163,8 +169,9 @@ def validate_vesting_data_web(vesting_entries: List[VestingEntry], calendar_year
     return True
 
 
-# --- Data Fetching Functions (adapted for Flask logging and error flashing) ---
-
+# --- Data Fetching Functions ---
+# Consider adding caching here for production (e.g., using Flask-Caching)
+# @cache.cached(timeout=300, key_prefix='yahoo_stock_prices') # Example
 def fetch_yahoo_stock_prices_for_symbol(
         stock_symbol: StockSymbol,
         earliest_acq_date_str: DateStringYYYYMMDD,
@@ -175,6 +182,7 @@ def fetch_yahoo_stock_prices_for_symbol(
     earliest_acq_dt = get_date_obj_from_str(earliest_acq_date_str)
     if not earliest_acq_dt:
         flash(f"Internal error: Invalid earliest acquisition date for {stock_symbol}.", "error")
+        app.logger.error(f"Invalid earliest_acq_date_str '{earliest_acq_date_str}' for symbol {stock_symbol}")
         return prices_for_symbol
 
     fetch_start_dt_obj = earliest_acq_dt - datetime.timedelta(days=45)
@@ -199,18 +207,21 @@ def fetch_yahoo_stock_prices_for_symbol(
         history_table_div = pq('div[data-testid="history-table"]')
         if not history_table_div.length:
             flash(
-                f"Could not find history table container for {stock_symbol}. The page structure might have changed or the symbol is invalid.",
+                f"Could not find history table for {stock_symbol}. The page structure might have changed or the symbol is invalid/delisted.",
                 "warning")
+            app.logger.warning(f"No history table div for {stock_symbol} at {stock_prices_url}")
             return prices_for_symbol
 
         table_element = history_table_div('table')
         if not table_element.length:
-            flash(f"No table found within history div for {stock_symbol}.", "warning")
+            flash(f"No table element found within history div for {stock_symbol}.", "warning")
+            app.logger.warning(f"No table element for {stock_symbol} at {stock_prices_url}")
             return prices_for_symbol
 
         rows = table_element('tbody > tr')
         if not rows.length:
             flash(f"No data rows found in the history table for {stock_symbol}.", "warning")
+            app.logger.warning(f"No data rows for {stock_symbol} at {stock_prices_url}")
             return prices_for_symbol
 
         for row_html_pq in rows.items():
@@ -224,21 +235,21 @@ def fetch_yahoo_stock_prices_for_symbol(
                     dt_obj = datetime.datetime.strptime(date_text, DATE_FORMAT_YAHOO_PARSE)
                     formatted_date_key = dt_obj.strftime(DATE_FORMAT_INPUT_SCRIPT)
                     price_val = float(close_price_text.replace(',', ''))
-                    prices_for_symbol[formatted_date_key] = round(price_val, 4)  # Using 4 decimal places for precision
+                    prices_for_symbol[formatted_date_key] = round(price_val, 4)
                 except ValueError:
-                    app.logger.warning(
-                        f"Skipping row for {stock_symbol} due to parsing error (ValueError): {cells.text()[:100]}")
+                    app.logger.warning(f"Parsing ValueError for {stock_symbol} row: {cells.text()[:100]}")
                     continue
                 except Exception as cell_err:
-                    app.logger.warning(
-                        f"Skipping row for {stock_symbol} due to unexpected cell error: {cell_err}. Row: {cells.text()[:100]}")
+                    app.logger.error(f"Unexpected cell error for {stock_symbol}: {cell_err}. Row: {cells.text()[:100]}")
                     continue
         return OrderedDict(sorted(prices_for_symbol.items()))
 
     except URLError as e:
         flash(f"URL Error fetching stock prices for {stock_symbol}: {e}. Check network or symbol.", "error")
+        app.logger.error(f"URLError for {stock_symbol} at {stock_prices_url}: {e}")
     except Exception as e:
         flash(f"Unexpected error for {stock_symbol} during price fetching: {e}", "error")
+        app.logger.error(f"General Exception for {stock_symbol} at {stock_prices_url}: {e}")
     return prices_for_symbol
 
 
@@ -255,6 +266,7 @@ def fetch_all_stock_prices(
     return all_prices
 
 
+# @cache.cached(timeout=3600, key_prefix='sbi_rates') # Example: Cache for 1 hour
 def fetch_sbi_exchange_rates() -> SbiExchangeRates:
     app.logger.info(f"Fetching SBI exchange rates from {SBI_RATES_URL}")
     sbi_rates_data: SbiExchangeRates = OrderedDict()
@@ -270,18 +282,27 @@ def fetch_sbi_exchange_rates() -> SbiExchangeRates:
             if len(parts) >= 3:
                 date_str_csv = parts[0][:10]
                 rate_str = parts[2]
-                if rate_str and rate_str.replace('.', '', 1).isdigit() and float(rate_str) != 0.0:
-                    try:
-                        dt_obj = datetime.datetime.strptime(date_str_csv, DATE_FORMAT_SBI_PARSE)
-                        formatted_date_key = dt_obj.strftime(DATE_FORMAT_INPUT_SCRIPT)
-                        rate = float(rate_str)
-                        sbi_rates_data[formatted_date_key] = round(rate, 4)  # Using 4 decimal places for precision
-                    except ValueError:
+                # Check if rate_str is a valid number (can be float) and not zero
+                try:
+                    rate_val = float(rate_str)
+                    if rate_val == 0.0:
                         continue
+                except ValueError:
+                    continue  # Skip if rate is not a valid number
+
+                try:
+                    dt_obj = datetime.datetime.strptime(date_str_csv, DATE_FORMAT_SBI_PARSE)
+                    formatted_date_key = dt_obj.strftime(DATE_FORMAT_INPUT_SCRIPT)
+                    sbi_rates_data[formatted_date_key] = round(rate_val, 4)
+                except ValueError:
+                    app.logger.warning(f"Skipping SBI rate line with invalid date format: {line}")
+                    continue
     except URLError as e:
         flash(f"Critical Error: Could not fetch SBI rates: {e}. Check URL or network connection.", "error")
+        app.logger.error(f"URLError fetching SBI rates: {e}")
     except Exception as e:
         flash(f"Critical Error: An unexpected error occurred during SBI rate fetching: {e}", "error")
+        app.logger.error(f"General Exception fetching SBI rates: {e}")
 
     if not sbi_rates_data:
         flash("No SBI rates fetched. Calculations involving INR will be affected.", "warning")
@@ -400,7 +421,7 @@ def format_report_line_for_web(
 
     return ReportLine(
         stock_symbol=entry.stock_symbol,
-        num_shares=entry.num_shares,  # Keep original precision for data integrity
+        num_shares=entry.num_shares,
         acquisition_date_str=entry.acquisition_date_str,
         acq_price_display_str=acq_price_display,
         initial_value_display_str=initial_value_display,
@@ -412,9 +433,9 @@ def format_report_line_for_web(
 # --- Flask Routes ---
 @app.route('/', methods=['GET', 'POST'])
 def index():
-    current_year = datetime.date.today().year - 1  # Default to previous year
+    current_year = datetime.date.today().year - 1
     form_data_repopulation = []
-    results_data = None  # Initialize results_data
+    results_data = None
 
     if request.method == 'POST':
         stock_symbols_list = request.form.getlist('stock_symbol')
@@ -437,7 +458,7 @@ def index():
                                    form_data=form_data_repopulation,
                                    calendar_year_val=calendar_year_str,
                                    current_year=current_year,
-                                   results=None)  # Pass None for results on error
+                                   results=None)
 
         vesting_data_list, calendar_year_int, lowest_acq_dates_map = parse_vesting_data_from_form(
             stock_symbols_list, acquisition_dates_list, num_shares_list_str, calendar_year_str
@@ -459,7 +480,7 @@ def index():
 
         all_stock_symbols_set = set(entry.stock_symbol for entry in vesting_data_list)
 
-        # Fetch data
+        # Consider adding caching for these calls in production
         all_stock_prices_data = fetch_all_stock_prices(
             all_stock_symbols_set, lowest_acq_dates_map, calendar_year_int
         )
@@ -511,8 +532,8 @@ def index():
             report_data_for_template.append(report_line_obj)
 
         results_data = report_data_for_template
-        if not results_data:
-            flash("No data processed. Please check your input or data sources.", "info")
+        if not results_data and vesting_data_list:  # If there were entries but no results (e.g. all fetching failed)
+            flash("No data processed. Please check your input or external data sources.", "info")
 
         return render_template('index.html',
                                results=results_data,
@@ -520,8 +541,7 @@ def index():
                                calendar_year_val=calendar_year_str,
                                current_year=current_year)
 
-    # GET request: display empty form with one row
-    if not form_data_repopulation:  # Ensure at least one row for initial display
+    if not form_data_repopulation:
         form_data_repopulation.append(InputRow("", "", ""))
     return render_template('index.html',
                            form_data=form_data_repopulation,
@@ -531,5 +551,24 @@ def index():
 
 
 if __name__ == "__main__":
-    print("Flask app running. Open http://127.0.0.1:5000/ in your browser.")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # For development:
+    # app.run(debug=True)
+
+    # For production, use a WSGI server like Gunicorn or Waitress.
+    # Example with Gunicorn (install with: pip install gunicorn):
+    # gunicorn -w 4 -b 0.0.0.0:8000 stock_analyzer_app:app
+    #
+    # Example with Waitress (install with: pip install waitress):
+    # waitress-serve --host 0.0.0.0 --port 8000 stock_analyzer_app:app
+    #
+    # The following is for development ONLY. Ensure app.debug is False in production.
+    if os.environ.get('FLASK_ENV') == 'production':
+        app.config['DEBUG'] = False
+        # from waitress import serve # Example for Waitress
+        # serve(app, host='0.0.0.0', port=8000)
+        print("Flask app is configured for production. Run with a WSGI server like Gunicorn or Waitress.")
+        print("Example: gunicorn -w 4 schedule_fa_app:app")
+    else:
+        app.config['DEBUG'] = True
+        print("Flask app running in DEBUG mode. Open http://127.0.0.1:5000/ in your browser.")
+        app.run(host='0.0.0.0', port=5000)
