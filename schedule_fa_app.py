@@ -30,7 +30,7 @@ if app.secret_key == 'dev_default_secret_key_change_me' and not app.debug:
 
 # --- Constants ---
 USER_AGENT = 'Mozilla/5.0'
-YAHOO_FINANCE_URL_TEMPLATE = "https://finance.yahoo.com/quote/{symbol}/history?period1={start_ts}&period2={end_ts}&interval=1d&filter=history&frequency=1d"
+YAHOO_FINANCE_URL_TEMPLATE = "https://finance.yahoo.com/quote/{symbol}/history/?period1={start_ts}&period2={end_ts}&interval=1d&filter=history&frequency=1d"
 SBI_RATES_URL = "https://raw.githubusercontent.com/sahilgupta/sbi-fx-ratekeeper/main/csv_files/SBI_REFERENCE_RATES_USD.csv"
 
 DATE_FORMAT_INPUT_SCRIPT = "%Y%m%d"
