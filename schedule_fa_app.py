@@ -50,11 +50,17 @@ class VestingEntry(NamedTuple):
 
 class ReportLine(NamedTuple):
     stock_symbol: str
-    num_shares: float
     acquisition_date_str: str
+    num_shares: float
+    acquire_price_per_share_in_usd: str
+    sbi_ttbr_rate_on_acquire_date: str
     acq_price_display_str: str
     initial_value_display_str: str
+    peak_value_per_share_in_usd: str
+    sbi_ttbr_rate_on_peak_date: str
     peak_output_str: str
+    close_value_per_share_in_usd: str
+    sbi_ttbr_rate_on_close_date: str
     closing_output_str: str
 
 
@@ -360,6 +366,13 @@ def format_report_line_for_web(
     peak_output_display = "N/A (N/A, N/A)"
     closing_output_display = "N/A (N/A, N/A)"
 
+    acquire_price_per_share_in_usd_str = f"{acq_usd_price_val:.4f}" if acq_usd_price_val is not None else "N/A"
+    sbi_ttbr_rate_on_acquire_date_str = f"{sbi_rate_on_acq:.4f}" if sbi_rate_on_acq is not None else "N/A"
+    peak_value_per_share_in_usd_str = f"{peak_usd_price_val:.4f}" if peak_usd_price_val is not None else "N/A"
+    sbi_ttbr_rate_on_peak_date_str = f"{sbi_rate_on_peak:.4f}" if sbi_rate_on_peak is not None else "N/A"
+    close_value_per_share_in_usd_str = f"{closing_usd_price_val:.4f}" if closing_usd_price_val is not None else "N/A"
+    sbi_ttbr_rate_on_close_date_str = f"{sbi_rate_on_closing:.4f}" if sbi_rate_on_closing is not None else "N/A"
+
     if acq_usd_price_val is not None and sbi_rate_on_acq is not None:
         share_price_inr_on_acq = round(acq_usd_price_val * sbi_rate_on_acq, 4)  # Display with 2 decimal places
         initial_value_investment_inr = round(num_shares * share_price_inr_on_acq, 4)  # Display with 2 decimal places
@@ -383,11 +396,17 @@ def format_report_line_for_web(
 
     return ReportLine(
         stock_symbol=entry.stock_symbol,
-        num_shares=entry.num_shares,
         acquisition_date_str=entry.acquisition_date_str,
+        num_shares=entry.num_shares,
+        acquire_price_per_share_in_usd=acquire_price_per_share_in_usd_str,
+        sbi_ttbr_rate_on_acquire_date=sbi_ttbr_rate_on_acquire_date_str,
         acq_price_display_str=acq_price_display,
         initial_value_display_str=initial_value_display,
+        peak_value_per_share_in_usd=peak_value_per_share_in_usd_str,
+        sbi_ttbr_rate_on_peak_date=sbi_ttbr_rate_on_peak_date_str,
         peak_output_str=peak_output_display,
+        close_value_per_share_in_usd=close_value_per_share_in_usd_str,
+        sbi_ttbr_rate_on_close_date=sbi_ttbr_rate_on_close_date_str,
         closing_output_str=closing_output_display
     )
 

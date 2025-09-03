@@ -268,11 +268,17 @@
                     <thead>
                         <tr>
                             <th>Nasdaq Symbol</th>
-                            <th>Shares Acquired</th>
                             <th>Acq. Date (YYYYMMDD)</th>
+                            <th>Shares Acquired</th>
+                            <th>Acquire Price/Share (USD)</th>
+                            <th>SBI TTBR on Acquire Date</th>
                             <th>Acq. Price/Share (INR)</th>
                             <th>Initial Value (INR)</th>
+                            <th>Peak Value/Share (USD)</th>
+                            <th>SBI TTBR on Peak Date</th>
                             <th>Peak Value (INR) (Date YYYY/MM/DD, Price/Share INR)</th>
+                            <th>Close Value/Share (USD)</th>
+                            <th>SBI TTBR on Close Date</th>
                             <th>Closing Value (INR) (Date YYYY/MM/DD, Price/Share INR)</th>
                         </tr>
                     </thead>
@@ -280,11 +286,17 @@
                         {% for row in results %}
                         <tr>
                             <td>{{ row.stock_symbol }}</td>
-                            <td>{{ "%.4f"|format(row.num_shares|float) }}</td> {# Format float shares #}
                             <td>{{ row.acquisition_date_str }}</td>
+                            <td>{{ "%.4f"|format(row.num_shares|float) }}</td> {# Format float shares #}
+                            <td>{{ row.acquire_price_per_share_in_usd }}</td>
+                            <td>{{ row.sbi_ttbr_rate_on_acquire_date }}</td>
                             <td>{{ row.acq_price_display_str }}</td>
                             <td>{{ row.initial_value_display_str }}</td>
+                            <td>{{ row.peak_value_per_share_in_usd }}</td>
+                            <td>{{ row.sbi_ttbr_rate_on_peak_date }}</td>
                             <td>{{ row.peak_output_str }}</td>
+                            <td>{{ row.close_value_per_share_in_usd }}</td>
+                            <td>{{ row.sbi_ttbr_rate_on_close_date }}</td>
                             <td>{{ row.closing_output_str }}</td>
                         </tr>
                         {% endfor %}
