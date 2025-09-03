@@ -9,7 +9,9 @@ from typing import List, Dict, Tuple, Set, Optional, NamedTuple
 import os  # For environment variables
 
 import yfinance as yf
-from flask import Flask, render_template, request, flash, redirect, url_for
+from flask import Flask, render_template, request, flash, redirect, url_for, session, send_file
+import openpyxl
+from io import BytesIO
 
 # --- Flask App Setup ---
 app = Flask(__name__)
@@ -417,6 +419,7 @@ def index():
     current_year = datetime.date.today().year - 1
     form_data_repopulation = []
     results_data = None
+    session.pop('results_data', None)
 
     if request.method == 'POST':
         stock_symbols_list = request.form.getlist('stock_symbol')
@@ -512,7 +515,8 @@ def index():
             )
             report_data_for_template.append(report_line_obj)
 
-        results_data = report_data_for_template
+        results_data = [row._asdict() for row in report_data_for_template]
+        session['results_data'] = results_data
         if not results_data and vesting_data_list:  # If there were entries but no results (e.g. all fetching failed)
             flash("No data processed. Please check your input or external data sources.", "info")
 
@@ -529,6 +533,64 @@ def index():
                            calendar_year_val=str(current_year),
                            current_year=current_year,
                            results=None)
+
+
+@app.route('/download_excel')
+def download_excel():
+    results_data = session.get('results_data')
+    if not results_data:
+        flash("No results to download.", "error")
+        return redirect(url_for('index'))
+
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Stock Vesting Analysis"
+
+    headers = [
+        "Nasdaq Symbol",
+        "Acq. Date (YYYYMMDD)",
+        "Shares Acquired",
+        "Acquire Price/Share (USD)",
+        "SBI TTBR on Acquire Date",
+        "Acq. Price/Share (INR)",
+        "Initial Value (INR)",
+        "Peak Value/Share (USD)",
+        "SBI TTBR on Peak Date",
+        "Peak Value (INR) (Date YYYY/MM/DD, Price/Share INR)",
+        "Close Value/Share (USD)",
+        "SBI TTBR on Close Date",
+        "Closing Value (INR) (Date YYYY/MM/DD, Price/Share INR)",
+    ]
+    sheet.append(headers)
+
+    for row_data in results_data:
+        row = [
+            row_data.get('stock_symbol'),
+            row_data.get('acquisition_date_str'),
+            row_data.get('num_shares'),
+            row_data.get('acquire_price_per_share_in_usd'),
+            row_data.get('sbi_ttbr_rate_on_acquire_date'),
+            row_data.get('acq_price_display_str'),
+            row_data.get('initial_value_display_str'),
+            row_data.get('peak_value_per_share_in_usd'),
+            row_data.get('sbi_ttbr_rate_on_peak_date'),
+            row_data.get('peak_output_str'),
+            row_data.get('close_value_per_share_in_usd'),
+            row_data.get('sbi_ttbr_rate_on_close_date'),
+            row_data.get('closing_output_str')
+        ]
+        sheet.append(row)
+
+    excel_file = BytesIO()
+    workbook.save(excel_file)
+    excel_file.seek(0)
+
+    return send_file(
+        excel_file,
+        as_attachment=True,
+        download_name='stock_vesting_analysis.xlsx',
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
 
 
 if __name__ == "__main__":
