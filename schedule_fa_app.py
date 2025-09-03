@@ -8,6 +8,7 @@ import bisect
 from typing import List, Dict, Tuple, Set, Optional, NamedTuple
 import os  # For environment variables
 
+import yfinance as yf
 from flask import Flask, render_template, request, flash, redirect, url_for
 
 # --- Flask App Setup ---
@@ -185,72 +186,33 @@ def fetch_yahoo_stock_prices_for_symbol(
         app.logger.error(f"Invalid earliest_acq_date_str '{earliest_acq_date_str}' for symbol {stock_symbol}")
         return prices_for_symbol
 
-    fetch_start_dt_obj = earliest_acq_dt - datetime.timedelta(days=45)
-    start_date_ts = int(datetime.datetime(
-        fetch_start_dt_obj.year, fetch_start_dt_obj.month, fetch_start_dt_obj.day
-    ).timestamp())
-
-    end_date_dt = datetime.datetime(calendar_year_to_process + 1, 1, 15)
-    end_date_ts = int(end_date_dt.timestamp())
-
-    stock_prices_url = YAHOO_FINANCE_URL_TEMPLATE.format(
-        symbol=stock_symbol, start_ts=start_date_ts, end_ts=end_date_ts
-    )
-    app.logger.info(f"Fetching stock prices for {stock_symbol} from {stock_prices_url}")
+    start_date = earliest_acq_dt - datetime.timedelta(days=45)
+    end_date = datetime.date(calendar_year_to_process + 1, 1, 15)
 
     try:
-        req = Request(stock_prices_url, headers={'User-Agent': USER_AGENT})
-        with urlopen(req, timeout=10) as response:
-            html_content = response.read()
-        pq = PyQuery(html_content)
+        ticker = yf.Ticker(stock_symbol)
+        history = ticker.history(start=start_date, end=end_date, interval="1d", auto_adjust=False)
 
-        history_table_div = pq('div[data-testid="history-table"]')
-        if not history_table_div.length:
-            flash(
-                f"Could not find history table for {stock_symbol}. The page structure might have changed or the symbol is invalid/delisted.",
-                "warning")
-            app.logger.warning(f"No history table div for {stock_symbol} at {stock_prices_url}")
+        if history.empty:
+            flash(f"No stock history found for {stock_symbol}. It may be invalid or delisted.", "warning")
+            app.logger.warning(f"No history for {stock_symbol} between {start_date} and {end_date}")
             return prices_for_symbol
 
-        table_element = history_table_div('table')
-        if not table_element.length:
-            flash(f"No table element found within history div for {stock_symbol}.", "warning")
-            app.logger.warning(f"No table element for {stock_symbol} at {stock_prices_url}")
-            return prices_for_symbol
+        for date, row in history.iterrows():
+            formatted_date_key = date.strftime(DATE_FORMAT_INPUT_SCRIPT)
+            try:
+                price_val = round(float(row["Close"]), 4)
+                prices_for_symbol[formatted_date_key] = price_val
+            except Exception as e:
+                app.logger.error(f"Error parsing price row for {stock_symbol} on {date}: {e}")
+                continue
 
-        rows = table_element('tbody > tr')
-        if not rows.length:
-            flash(f"No data rows found in the history table for {stock_symbol}.", "warning")
-            app.logger.warning(f"No data rows for {stock_symbol} at {stock_prices_url}")
-            return prices_for_symbol
-
-        for row_html_pq in rows.items():
-            cells = row_html_pq('td')
-            if len(cells) == 7:
-                try:
-                    date_text = cells.eq(0).text()
-                    close_price_text = cells.eq(4).text()
-                    if not date_text or not close_price_text or close_price_text == '-':
-                        continue
-                    dt_obj = datetime.datetime.strptime(date_text, DATE_FORMAT_YAHOO_PARSE)
-                    formatted_date_key = dt_obj.strftime(DATE_FORMAT_INPUT_SCRIPT)
-                    price_val = float(close_price_text.replace(',', ''))
-                    prices_for_symbol[formatted_date_key] = round(price_val, 4)
-                except ValueError:
-                    app.logger.warning(f"Parsing ValueError for {stock_symbol} row: {cells.text()[:100]}")
-                    continue
-                except Exception as cell_err:
-                    app.logger.error(f"Unexpected cell error for {stock_symbol}: {cell_err}. Row: {cells.text()[:100]}")
-                    continue
         return OrderedDict(sorted(prices_for_symbol.items()))
 
-    except URLError as e:
-        flash(f"URL Error fetching stock prices for {stock_symbol}: {e}. Check network or symbol.", "error")
-        app.logger.error(f"URLError for {stock_symbol} at {stock_prices_url}: {e}")
     except Exception as e:
-        flash(f"Unexpected error for {stock_symbol} during price fetching: {e}", "error")
-        app.logger.error(f"General Exception for {stock_symbol} at {stock_prices_url}: {e}")
-    return prices_for_symbol
+        flash(f"Error fetching stock prices for {stock_symbol}: {e}", "error")
+        app.logger.error(f"Error fetching stock prices for {stock_symbol}: {e}")
+        return prices_for_symbol
 
 
 def fetch_all_stock_prices(
