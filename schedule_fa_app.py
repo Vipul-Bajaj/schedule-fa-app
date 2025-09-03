@@ -435,7 +435,7 @@ def index():
                 df = pd.read_excel(file)
                 df.columns = [col.lower().replace(' ', '_') for col in df.columns]
                 stock_symbols_list = df['stock_symbol'].tolist()
-                acquisition_dates_list = df['acquire_date'].tolist()
+                acquisition_dates_list = pd.to_datetime(df['acquire_date']).dt.strftime('%Y%m%d').tolist()
                 num_shares_list_str = df['number_of_shares_vested'].tolist()
                 flash("Data loaded from Excel file.", "info")
             except Exception as e:
