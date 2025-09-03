@@ -7,6 +7,7 @@ from pyquery import PyQuery
 import bisect
 from typing import List, Dict, Tuple, Set, Optional, NamedTuple
 import os  # For environment variables
+import pandas as pd
 
 import yfinance as yf
 from flask import Flask, render_template, request, flash, redirect, url_for, session, send_file
@@ -84,7 +85,7 @@ SbiExchangeRates = OrderedDict[DateStringYYYYMMDD, Price]
 
 def get_date_obj_from_str(date_str: DateStringYYYYMMDD) -> Optional[datetime.date]:
     try:
-        return datetime.datetime.strptime(date_str, DATE_FORMAT_INPUT_SCRIPT).date()
+        return datetime.datetime.strptime(str(date_str), DATE_FORMAT_INPUT_SCRIPT).date()
     except (ValueError, TypeError) as e:
         app.logger.error(f"Error converting date string '{date_str}': {e}")
         return None
@@ -105,8 +106,8 @@ def parse_vesting_data_from_form(
 
     for i in range(len(stock_symbols_list)):
         symbol = stock_symbols_list[i].strip().upper()
-        date_str = acquisition_dates_list[i].strip()
-        shares_str = num_shares_list_str[i].strip()
+        date_str = str(acquisition_dates_list[i]).strip()
+        shares_str = str(num_shares_list_str[i]).strip()
 
         if not symbol and not date_str and not shares_str:
             continue
@@ -422,9 +423,28 @@ def index():
     session.pop('results_data', None)
 
     if request.method == 'POST':
-        stock_symbols_list = request.form.getlist('stock_symbol')
-        acquisition_dates_list = request.form.getlist('acquisition_date')
-        num_shares_list_str = request.form.getlist('num_shares')
+        stock_symbols_list = []
+        acquisition_dates_list = []
+        num_shares_list_str = []
+
+        file_uploaded = 'file' in request.files and request.files['file'].filename != ''
+
+        if file_uploaded:
+            file = request.files['file']
+            try:
+                df = pd.read_excel(file)
+                df.columns = [col.lower().replace(' ', '_') for col in df.columns]
+                stock_symbols_list = df['stock_symbol'].tolist()
+                acquisition_dates_list = df['acquire_date'].tolist()
+                num_shares_list_str = df['number_of_shares_vested'].tolist()
+                flash("Data loaded from Excel file.", "info")
+            except Exception as e:
+                flash(f"Error reading Excel file: {e}", "error")
+        else:
+            stock_symbols_list = request.form.getlist('stock_symbol')
+            acquisition_dates_list = request.form.getlist('acquisition_date')
+            num_shares_list_str = request.form.getlist('num_shares')
+
         calendar_year_str = request.form.get('calendar_year', str(current_year))
 
         for i in range(len(stock_symbols_list)):
@@ -443,6 +463,15 @@ def index():
                                    calendar_year_val=calendar_year_str,
                                    current_year=current_year,
                                    results=None)
+
+        if not file_uploaded and not any(s for s in stock_symbols_list if s):
+             flash("Please either upload a file or enter data manually.", "error")
+             return render_template('index.html',
+                                   form_data=form_data_repopulation,
+                                   calendar_year_val=calendar_year_str,
+                                   current_year=current_year,
+                                   results=None)
+
 
         vesting_data_list, calendar_year_int, lowest_acq_dates_map = parse_vesting_data_from_form(
             stock_symbols_list, acquisition_dates_list, num_shares_list_str, calendar_year_str

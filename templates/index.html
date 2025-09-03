@@ -39,7 +39,7 @@
             font-weight: 600;
             color: #495057;
         }
-        input[type="text"], input[type="number"], input[type="submit"], button {
+        input[type="text"], input[type="number"], input[type="submit"], button, input[type="file"] {
             width: 100%;
             padding: 12px;
             margin-bottom: 10px;
@@ -203,12 +203,17 @@
             {% endif %}
         {% endwith %}
 
-        <form method="POST" id="vestingForm">
+        <form method="POST" id="vestingForm" enctype="multipart/form-data">
             <div class="form-section">
-                <label for="vesting_data_table">Vesting Data Entries:</label>
+                <label for="file">Upload Excel File (Optional):</label>
+                <input type="file" name="file" id="file" accept=".xls,.xlsx">
                 <p class="input-hint">
-                    Enter each vesting entry in a new row. Click "Add Vesting Entry" for more rows.
+                    The Excel file should have three columns: "stock_symbol", "acquire_date", and "number_of_shares_vested". The acquire_date should be in YYYYMMDD format.
                 </p>
+            </div>
+
+            <div class="form-section">
+                <label for="vesting_data_table">Or Enter Vesting Data Manually:</label>
                 <table id="vestingInputTable">
                     <thead>
                         <tr>
@@ -222,17 +227,17 @@
                         {% if form_data %}
                             {% for row_data in form_data %}
                             <tr>
-                                <td><input type="text" name="stock_symbol" value="{{ row_data.stock_symbol }}" placeholder="e.g., AAPL" required></td>
-                                <td><input type="text" name="acquisition_date" value="{{ row_data.acquisition_date }}" placeholder="e.g., 20230115" pattern="\d{8}" title="Enter date as YYYYMMDD" required></td>
-                                <td><input type="number" name="num_shares" value="{{ row_data.num_shares }}" placeholder="e.g., 10" step="any" min="0.0001" required></td>
+                                <td><input type="text" name="stock_symbol" value="{{ row_data.stock_symbol }}" placeholder="e.g., AAPL"></td>
+                                <td><input type="text" name="acquisition_date" value="{{ row_data.acquisition_date }}" placeholder="e.g., 20230115" pattern="\d{8}" title="Enter date as YYYYMMDD"></td>
+                                <td><input type="number" name="num_shares" value="{{ row_data.num_shares }}" placeholder="e.g., 10" step="any" min="0.0001"></td>
                                 <td><button type="button" class="remove-row-btn" onclick="removeRow(this)">Remove</button></td>
                             </tr>
                             {% endfor %}
                         {% else %}
                              <tr>
-                                <td><input type="text" name="stock_symbol" placeholder="e.g., AAPL" required></td>
-                                <td><input type="text" name="acquisition_date" placeholder="e.g., 20230115" pattern="\d{8}" title="Enter date as YYYYMMDD" required></td>
-                                <td><input type="number" name="num_shares" placeholder="e.g., 10" step="any" min="0.0001" required></td>
+                                <td><input type="text" name="stock_symbol" placeholder="e.g., AAPL"></td>
+                                <td><input type="text" name="acquisition_date" placeholder="e.g., 20230115" pattern="\d{8}" title="Enter date as YYYYMMDD"></td>
+                                <td><input type="number" name="num_shares" placeholder="e.g., 10" step="any" min="0.0001"></td>
                                 <td><button type="button" class="remove-row-btn" onclick="removeRow(this)">Remove</button></td>
                             </tr>
                         {% endif %}
@@ -313,9 +318,9 @@
             const table = document.getElementById('vestingInputTable').getElementsByTagName('tbody')[0];
             const newRow = table.insertRow();
             newRow.innerHTML = `
-                <td><input type="text" name="stock_symbol" placeholder="e.g., AAPL" required></td>
-                <td><input type="text" name="acquisition_date" placeholder="e.g., 20230115" pattern="\\d{8}" title="Enter date as YYYYMMDD" required></td>
-                <td><input type="number" name="num_shares" placeholder="e.g., 10" step="any" min="0.0001" required></td>
+                <td><input type="text" name="stock_symbol" placeholder="e.g., AAPL"></td>
+                <td><input type="text" name="acquisition_date" placeholder="e.g., 20230115" pattern="\\d{8}" title="Enter date as YYYYMMDD"></td>
+                <td><input type="number" name="num_shares" placeholder="e.g., 10" step="any" min="0.0001"></td>
                 <td><button type="button" class="remove-row-btn" onclick="removeRow(this)">Remove</button></td>
             `;
         }
@@ -343,6 +348,27 @@
             const form = document.getElementById('vestingForm');
             const loadingIndicator = document.getElementById('loadingIndicator');
             const resultsDisplayArea = document.getElementById('resultsDisplayArea');
+            const fileInput = document.getElementById('file');
+            const vestingTable = document.getElementById('vestingInputTable');
+
+            function toggleManualInputs(disabled) {
+                const inputs = vestingTable.getElementsByTagName('input');
+                const buttons = vestingTable.getElementsByTagName('button');
+                for (let i = 0; i < inputs.length; i++) {
+                    inputs[i].disabled = disabled;
+                    inputs[i].required = !disabled;
+                }
+                 for (let i = 0; i < buttons.length; i++) {
+                    buttons[i].disabled = disabled;
+                }
+            }
+
+            if (fileInput) {
+                fileInput.addEventListener('change', function() {
+                    toggleManualInputs(this.files.length > 0);
+                });
+            }
+
 
             if (form) {
                 form.addEventListener('submit', function() {
